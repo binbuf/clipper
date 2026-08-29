@@ -37,7 +37,7 @@ class Config:
     video_bitrate: str
     audio_codec: str
     audio_bitrate: str
-    resolution: str                # e.g. "1920x1080"
+    resolution: str                # bounding box "WxH"; long edge caps output, aspect preserved, no pad
     fps: int
     loudnorm: str                  # ffmpeg loudnorm args, e.g. "I=-14:TP=-1.5:LRA=11"
     # Runtime
@@ -218,10 +218,22 @@ def has_human(cap, start_sec, end_sec, model, cfg):
 
 def process_scene(input_file, start_time, duration, output_file, cfg):
     tmp_output = output_file.with_suffix('.tmp.mp4')
+    # `resolution` is a *bounding box*, not a fixed output canvas: cap the long
+    # edge at max(w, h) while preserving each clip's own aspect ratio (portrait
+    # stays portrait, landscape stays landscape) and never upscaling. Do NOT pad
+    # to a fixed frame — padding bakes black bars into the pixels, so a portrait
+    # clip would ship as a letterboxed landscape file and the player (a read-only
+    # consumer that cannot crop baked-in bars) shows it as a horizontal strip
+    # with the content boxed inside on a portrait phone. The `min(edge, iw/ih)`
+    # box caps the long edge without upscaling; `force_divisible_by=2` keeps the
+    # even dimensions H.264/H.265 4:2:0 requires. Commas inside min() are escaped
+    # (`\,`) so ffmpeg's filtergraph parser doesn't read them as filter separators.
     w, h = cfg.resolution.lower().split('x')
+    long_edge = max(int(w), int(h))
     vf = (
-        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps={cfg.fps}"
+        f"scale=w=min({long_edge}\\,iw):h=min({long_edge}\\,ih):"
+        f"force_original_aspect_ratio=decrease:force_divisible_by=2,"
+        f"fps={cfg.fps}"
     )
     cmd = [
         "ffmpeg", "-y",
@@ -366,7 +378,7 @@ def main():
     parser.add_argument("--video-bitrate", default="3000k", help="Target video bitrate (default: 3000k)")
     parser.add_argument("--audio-codec", default="aac", help="FFmpeg audio codec (default: aac)")
     parser.add_argument("--audio-bitrate", default="128k", help="Target audio bitrate (default: 128k)")
-    parser.add_argument("--resolution", default="1920x1080", help="Output WxH (default: 1920x1080)")
+    parser.add_argument("--resolution", default="1920x1080", help="Bounding box WxH; the long edge (max of W,H) caps output while each clip keeps its own aspect ratio, never upscaled or padded (default: 1920x1080)")
     parser.add_argument("--fps", type=int, default=30, help="Output frame rate (default: 30)")
     parser.add_argument("--loudnorm", default="I=-14:TP=-1.5:LRA=11",
                         help="FFmpeg loudnorm args (default: I=-14:TP=-1.5:LRA=11)")

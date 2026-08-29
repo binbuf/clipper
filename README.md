@@ -20,7 +20,7 @@
 - 🔗 **Smart Shot Grouping:** Merges rapid cuts into cohesive scenes based on visual similarity (histogram correlation).
 - 👤 **Human-Centric Filtering:** Utilizes YOLO11 to ensure extracted clips feature prominent human subjects, strictly filtering out graphics, intros, and logos.
 - 🎛️ **Standardized Output:** 
-  - **Video:** HEVC (H.265), 1080p, 30fps (pillarboxed/letterboxed to maintain aspect ratio).
+  - **Video:** HEVC (H.265), 30fps, long edge capped at 1080p with each clip's native aspect ratio preserved (portrait stays portrait, landscape stays landscape — never pillarboxed/letterboxed, so no black bars are baked into the pixels).
   - **Audio:** AAC, EBU R128 loudness normalized.
 - 📁 **Batch Processing:** Seamlessly processes entire directories of mixed video formats.
 - 🔄 **Resumable Processing:** Safely interrupt and resume jobs. Already-processed files can be skipped automatically using `--processed-list`.
@@ -87,7 +87,7 @@ Every value below is configurable; the defaults match Clipper's intended use (hu
 | `--encoder` | Simplified flag to select the video encoder (`h264`, `hevc`, `av1`). Overrides `--video-codec`. | `None` |
 | `--video-codec` / `--video-bitrate` | Output FFmpeg video codec / target bitrate. | `libx265` / `3000k` |
 | `--audio-codec` / `--audio-bitrate` | Output audio codec / target bitrate. | `aac` / `128k` |
-| `--resolution` / `--fps` | Output `WxH` / frame rate. | `1920x1080` / `30` |
+| `--resolution` / `--fps` | Bounding box `WxH` (long edge caps output; aspect preserved, never upscaled or padded) / frame rate. | `1920x1080` / `30` |
 | `--loudnorm` | FFmpeg `loudnorm` (EBU R128) parameters. | `I=-14:TP=-1.5:LRA=11` |
 
 ### Example
