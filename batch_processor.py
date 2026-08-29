@@ -252,12 +252,22 @@ def render_job(video_path, start_sec, duration_sec, out_filepath, cfg, s_idx, to
     try:
         process_scene(video_path, start_sec, duration_sec, out_filepath, cfg)
         log(f"    + Finished Scene {s_idx}/{total}: {out_filepath.name}")
+        return True
     except subprocess.CalledProcessError:
         log(f"    ! Error processing scene {s_idx}. FFmpeg failed.")
+        return False
 
 
 def build_config(args):
     grace = args.max_grace if args.max_grace is not None else 0.15 * args.max_seconds
+    if getattr(args, 'encoder', None):
+        if args.encoder == "h264":
+            args.video_codec = "libx264"
+        elif args.encoder == "hevc":
+            args.video_codec = "libx265"
+        elif args.encoder == "av1":
+            args.video_codec = "libsvtav1"
+
     return Config(
         model=args.model,
         device=resolve_device(args.gpu),
@@ -280,10 +290,42 @@ def build_config(args):
     )
 
 
+_list_lock = threading.Lock()
+
+class VideoProgress:
+    def __init__(self, list_path, rel_path, total_scenes):
+        self.list_path = list_path
+        self.rel_path = rel_path
+        self.total = total_scenes
+        self.completed = 0
+        self.failed = 0
+        self.lock = threading.Lock()
+
+    def scene_done(self, future):
+        with self.lock:
+            try:
+                success = future.result()
+            except Exception:
+                success = False
+            
+            if success:
+                self.completed += 1
+            else:
+                self.failed += 1
+            
+            if self.completed + self.failed == self.total:
+                if self.failed == 0 and self.list_path:
+                    with _list_lock:
+                        with open(self.list_path, 'a', encoding='utf-8') as f:
+                            f.write(str(self.rel_path) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description="Batch process scenes with medium/close-up humans.")
     parser.add_argument("-i", "--input", required=True, help="Input folder")
     parser.add_argument("-o", "--output", required=True, help="Output bucket folder")
+    parser.add_argument("--processed-list", type=str, default=None,
+                        help="Path to a text file containing a list of relative file paths that have already been processed.")
 
     # Durations
     parser.add_argument("-m", "--min-seconds", type=float, default=45.0,
@@ -318,6 +360,8 @@ def main():
                         help="YOLO model name or path (default: yolo11s.pt)")
 
     # Encoding
+    parser.add_argument("--encoder", choices=["h264", "hevc", "av1"], default=None,
+                        help="Simplified flag to choose the video encoder. Maps to libx264, libx265 (default), or libsvtav1. Overrides --video-codec if set.")
     parser.add_argument("--video-codec", default="libx265", help="FFmpeg video codec (default: libx265)")
     parser.add_argument("--video-bitrate", default="3000k", help="Target video bitrate (default: 3000k)")
     parser.add_argument("--audio-codec", default="aac", help="FFmpeg audio codec (default: aac)")
@@ -334,6 +378,14 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    processed_files = set()
+    if args.processed_list and os.path.exists(args.processed_list):
+        with open(args.processed_list, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped:
+                    processed_files.add(str(Path(stripped)))
+
     # Load the detector after parsing so --model / --help are honored without paying the load cost.
     print(f"Loading model '{cfg.model}' on device '{cfg.device}'...")
     detector_model = YOLO(cfg.model)
@@ -347,6 +399,15 @@ def main():
 
     with ThreadPoolExecutor(max_workers=cfg.jobs) as executor:
         for v_idx, video_path in enumerate(videos, start=1):
+            try:
+                rel_path = video_path.relative_to(input_dir)
+            except ValueError:
+                rel_path = video_path.name
+                
+            if str(rel_path) in processed_files:
+                print(f"\n[{v_idx}/{len(videos)}] Skipping: {video_path.name} (already processed)")
+                continue
+
             clean_base_name = sanitize_filename(video_path.name)
             base_name_no_ext = os.path.splitext(clean_base_name)[0]
 
@@ -372,6 +433,8 @@ def main():
                 logical_scenes = group_shots_into_scenes(cap, raw_cuts, cfg)
                 total = len(logical_scenes)
                 print(f"  -> Grouped into {total} continuous scenes. Scanning for close-ups...")
+                
+                queued_futures = []
 
                 for s_idx, (start_sec, end_sec) in enumerate(logical_scenes, start=1):
                     out_filename = f"{base_name_no_ext}_scene{s_idx:04d}.mp4"
@@ -395,9 +458,19 @@ def main():
                     print(f"    + Queuing Scene {s_idx}/{total}: "
                           f"[{format_tc(start_sec)} to {format_tc(end_sec)}] (Duration: {duration_sec:.1f}s)")
 
-                    # Only the render is parallelized; analysis above stays on this thread and owns `cap`.
-                    executor.submit(render_job, video_path, start_sec, duration_sec,
-                                    out_filepath, cfg, s_idx, total)
+                    future = executor.submit(render_job, video_path, start_sec, duration_sec,
+                                             out_filepath, cfg, s_idx, total)
+                    queued_futures.append(future)
+                
+                if not queued_futures:
+                    if args.processed_list:
+                        with _list_lock:
+                            with open(args.processed_list, 'a', encoding='utf-8') as f:
+                                f.write(str(rel_path) + '\n')
+                else:
+                    progress = VideoProgress(args.processed_list, rel_path, len(queued_futures))
+                    for f in queued_futures:
+                        f.add_done_callback(progress.scene_done)
             finally:
                 cap.release()
 

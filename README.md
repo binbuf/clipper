@@ -23,6 +23,7 @@
   - **Video:** HEVC (H.265), 1080p, 30fps (pillarboxed/letterboxed to maintain aspect ratio).
   - **Audio:** AAC, EBU R128 loudness normalized.
 - 📁 **Batch Processing:** Seamlessly processes entire directories of mixed video formats.
+- 🔄 **Resumable Processing:** Safely interrupt and resume jobs. Already-processed files can be skipped automatically using `--processed-list`.
 - 🌐 **Social Media:** Outputs media optimized for social media uploads.
 
 ## 🛠️ Prerequisites
@@ -61,6 +62,7 @@ Every value below is configurable; the defaults match Clipper's intended use (hu
 | :--- | :--- | :--- | :--- |
 | `--input` | `-i` | **(Required)** Path to the directory containing source videos. | - |
 | `--output` | `-o` | **(Required)** Path to the destination directory for processed clips. | - |
+| `--processed-list` | | Path to a text file for tracking processed videos. Files listed here are skipped, and successfully finished videos are automatically appended. | - |
 | `--min-seconds` | `-m` | Minimum duration in seconds for an extracted clip. | `45.0` |
 | `--max-seconds` | `-x` | Maximum approximate clip duration in seconds. | `300.0` |
 | `--max-grace` | | Seconds a shot may run past `--max-seconds` to reach a natural camera cut before a hard cut is forced. | `15%` of max |
@@ -82,7 +84,8 @@ Every value below is configurable; the defaults match Clipper's intended use (hu
 | :--- | :--- | :--- |
 | `--similarity` | Histogram correlation to merge camera angles in one scene. | `0.55` |
 | `--model` | YOLO model name or path. | `yolo11s.pt` |
-| `--video-codec` / `--video-bitrate` | Output video codec / target bitrate. | `libx265` / `3000k` |
+| `--encoder` | Simplified flag to select the video encoder (`h264`, `hevc`, `av1`). Overrides `--video-codec`. | `None` |
+| `--video-codec` / `--video-bitrate` | Output FFmpeg video codec / target bitrate. | `libx265` / `3000k` |
 | `--audio-codec` / `--audio-bitrate` | Output audio codec / target bitrate. | `aac` / `128k` |
 | `--resolution` / `--fps` | Output `WxH` / frame rate. | `1920x1080` / `30` |
 | `--loudnorm` | FFmpeg `loudnorm` (EBU R128) parameters. | `I=-14:TP=-1.5:LRA=11` |
